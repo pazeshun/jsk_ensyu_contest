@@ -1,0 +1,21 @@
+(turtlebot-init)
+(ros::rate 10)
+(while (= (elt (send *ri* :state :button-vector) 0) 0))
+(while (ros::ok)
+  (cond
+   ((= (elt (send *ri* :state :bumper-vector) 1) 1)
+    (dotimes (i 20)
+	(send *ri* :go-velocity -0.05 0 50)
+	(ros::sleep)))
+   ((= (elt (send *ri* :state :bumper-vector) 2) 1)
+    (dotimes (i 20)
+	(send *ri* :go-velocity -0.05 0 50)
+	(ros::sleep)))
+   ((= (elt (send *ri* :state :bumper-vector) 0) 1)
+    (dotimes (i 20)
+	(send *ri* :go-velocity -0.05 0 -50)
+	(ros::sleep)))
+   (t (send *ri* :go-velocity 0.1 0 0)))
+  )
+    
+    

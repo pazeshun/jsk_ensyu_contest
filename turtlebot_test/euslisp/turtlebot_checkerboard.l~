@@ -1,0 +1,141 @@
+#!/usr/bin/env roseus
+
+;; robotの初期化
+(load "package://dxl_armed_turtlebot/euslisp/dxl-armed-turtlebot-interface.l")
+(dxl-armed-turtlebot-init)
+
+;; ObjectDetection型トピックを使うため
+(ros::roseus-add-msgs "std_msgs")
+(ros::roseus-add-msgs "roseus")
+(ros::roseus-add-msgs "geometry_msgs")
+(ros::roseus-add-msgs "image_view2")
+(ros::roseus-add-msgs "posedetection_msgs")
+
+;;; 表示モデルなど
+(load "models/chessboard-30-7x5-object.l")
+(if (not (boundp '*irtviewer*)) (make-irtviewer))
+(setq *target-object* (chessboard-30-7x5 :name "/test_object"))
+(objects (list *target-object* *dxl-armed-turtlebot*))
+
+(defvar *root-frame-id* "camera_rgb_frame")
+(setq *tfb* (instance ros::transform-broadcaster :init))
+
+(ros::roseus "turtlebot_checkerboard")
+
+(setq obj_flag 0)
+(setq start_motion 0)
+;; ObjectDetection用コールバック関数定義
+(defun objectdetection-cb (msg)
+  (let ((mrk (instance image_view2::ImageMarker2 :init)) frame-id type ret)
+    ;; 物体モデルを配置
+    (setq frame-id (concatenate string "/" (send msg :header :frame_id)))
+    (mapcar #'(lambda (obj-pose)
+                (let* (;; (1) カメラ相対の座標系は、geometry_msgs/Poseという型で得られるので、Euslispのcoordsに変換する
+                       (cam->obj-coords (ros::tf-pose->coords (send obj-pose :pose)))
+                       ;; (2) *dxl-armed-turtlebot*モデルがカメラの座標系をもってるので、取得する
+                       (cam-coords (send (send *dxl-armed-turtlebot* :camera_rgb_optical_frame_lk) :copy-worldcoords)))
+                  ;; (3) Euslisp内部でのworld座標系の値にして、そこにcheckerboardモデルを配置する
+                  (send *target-object* :newcoords (send cam-coords :transform cam->obj-coords))
+		  (setq obj_flag 1)
+		  ;(send *dxl-armed-turtlebot* :inverse-kinematics
+			;(send *target-object* :worldcoords)
+			;j:rotation-axis nil)
+		  ;(send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 2000)
+		  ;(send *ri* :wait-interpolation)
+                  ))
+            (send msg :objects))
+    ;; image_markerを出力
+    (dolist (obj-pose (send msg :objects))
+      (setq type (send obj-pose :type))
+      (unless (eq (char type 0) #\/) (setq type (concatenate string "/" type)))
+      (setq ret (ros::tf-pose->coords (send obj-pose :pose)))
+      (send mrk :type image_view2::ImageMarker2::*FRAMES*)
+      (send mrk :frames (list type))
+      (send *tfb* :send-transform ret frame-id type)
+      (ros::ros-info "~A ~A ~A" ret frame-id type)
+      (ros::publish "image_marker" mrk))
+    ))
+;; コールバック関数を定義する
+(defun button-cb (msg)
+  (cond ((= (send msg :button) 0)
+	 (send *ri* :start-grasp))
+	((= (send msg :button) 1)
+	 (setq start_motion 1))
+	(t)
+	))
+
+(ros::advertise "image_marker" image_view2::ImageMarker2 1)
+(ros::subscribe "/camera/rgb/ObjectDetection" posedetection_msgs::ObjectDetection #'objectdetection-cb)
+(ros::subscribe
+ "/mobile_base/events/button" ;; subscribeしたいtopicの名前
+ kobuki_msgs::ButtonEvent;; subscribeしたいtopicの型
+ #'button-cb ;; コールバック関数
+ )
+
+;(send *dxl-armed-turtlebot* :tuckarm-pose3)
+;(send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 2000)
+;(send *ri* :wait-interpolation)
+;(send *dxl-armed-turtlebot* :reset-pose)
+;(send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 2000)
+;(send *ri* :wait-interpolation)
+(ros::rate 10)
+(send *dxl-armed-turtlebot* :init-pose)
+(send *irtviewer* :draw-objects)
+(send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 4000)
+(send *ri* :wait-interpolation)
+(send *dxl-armed-turtlebot* :gripper :arm :angle-vector #f(50))
+(send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 1000 :gipper-controller)
+(send *ri* :wait-interpolation :gripper-controller)
+(while (= start_motion 0)
+  (ros::spin-once)
+  (ros::sleep))
+(setq np (send *dxl-armed-turtlebot* :angle-vector))
+(setf (elt np 5) 90.0)
+(send *dxl-armed-turtlebot* :angle-vector np)
+(print (send *dxl-armed-turtlebot* :angle-vector))
+(send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 2000)
+(send *ri* :wait-interpolation)
+(do-until-key
+  (send *ri* :go-velocity 0 0 10)
+  (ros::spin-once)
+  (send *irtviewer* :draw-objects)
+  (x::window-main-one)
+  (if (= obj_flag 1)
+      (progn
+	(if (and (> (elt (send (send *target-object* :worldcoords) :pos) 1) -20) (< (elt (send (send *target-object* :worldcoords) :pos) 1) 20))
+	    (return))))
+  (ros::sleep)
+  )
+(do-until-key
+  (cond ((> (elt (send (send *target-object* :worldcoords) :pos) 1) 10)
+	 (send *ri* :go-velocity 0.05 0 10))
+	((< (elt (send (send *target-object* :worldcoords) :pos) 1) -10)
+	 (send *ri* :go-velocity 0.05 0 -10))
+	(t
+	 (if (< (elt (send (send *target-object* :worldcoords) :pos) 0) 800)
+	     (return))
+	 (send *ri* :go-velocity 0.05 0 0)
+	 ))
+ ;(print (send (send *target-object* :worldcoords) :pos))
+  (ros::spin-once)
+  (send *irtviewer* :draw-objects)
+  (x::window-main-one)
+  (ros::sleep)
+  )
+(send *ri* :go-velocity 0 0 0)
+(setq np (send *dxl-armed-turtlebot* :angle-vector))
+(setf (elt np 2) -55.0)
+(setf (elt np 4) -65.0)
+(setf (elt np 5) 90.0)
+(send *dxl-armed-turtlebot* :angle-vector np)
+(print (send *dxl-armed-turtlebot* :angle-vector))
+(send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 2000)
+(send *ri* :wait-interpolation)
+(setq np (send *dxl-armed-turtlebot* :angle-vector))
+(setf (elt np 4) 40.0)
+(send *dxl-armed-turtlebot* :angle-vector np)
+(print (send *dxl-armed-turtlebot* :angle-vector))
+(send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 200)
+(ros::sleep)
+(send *ri* :stop-grasp)
+(send *ri* :wait-interpolation)
