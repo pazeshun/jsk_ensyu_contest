@@ -113,6 +113,7 @@
 ;(send *dxl-armed-turtlebot* :reset-pose)
 ;(send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 2000)
 ;(send *ri* :wait-interpolation)
+;; アーム姿勢の初期化
 (ros::rate 10)
 (send *dxl-armed-turtlebot* :init-pose)
 (send *irtviewer* :draw-objects)
@@ -121,13 +122,15 @@
 (send *dxl-armed-turtlebot* :gripper :arm :angle-vector #f(50))
 (send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 1000 :gipper-controller)
 (send *ri* :wait-interpolation :gripper-controller)
+;; turtlebotのボタンが押されるまで待機
 (while (= start_motion 0)
   (ros::spin-once)
   (ros::sleep))
+;; kinectを邪魔しないようにアーム姿勢を変更
 (send *dxl-armed-turtlebot* :tuckarm-pose3)
 (send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 2000)
 (send *ri* :wait-interpolation)
-;; finding ball
+;; 車体全体を回転させてボール探し 
 (do-until-key
   (send *ri* :go-velocity 0 0 20)
   (ros::spin-once)
@@ -141,6 +144,7 @@
 		(return)))))
   (ros::sleep)
   )
+;; ボールに十分に近づく。ボールが画面中央付近から外れた時は蛇行して修正 
 (do-until-key
   (cond ((> (elt (send (send (car *target-ball-list*) :worldcoords) :pos) 1) 50)
 	 (send *ri* :go-velocity 0.05 0 10))
@@ -157,9 +161,11 @@
   (ros::sleep)
   )
 (send *ri* :go-velocity 0 0 0)
+;; ボール座標が最新の位置になるまで待機
 (setq ball_flag 0)
 (while (= ball_flag 0)
   (ros::spin-once))
+;; ボールが正面に来るよう、車体角度を調整
 (do-until-key
   (cond ((> (elt (send (send (car *target-ball-list*) :worldcoords) :pos) 1) 5)
 	 (send *ri* :go-velocity 0 0 5))
@@ -179,12 +185,14 @@
 ;(ros::sleep)
 (send *ri* :go-velocity 0 0 0)
 (ros::sleep)
+;; ボール座標が最新の位置になるまで待機
 (setq ball_flag 0)
 (while (= ball_flag 0)
   (ros::spin-once))
+;; わざと車体角度をオフセット
 (send *ri* :go-velocity -0.1 0 0)
 (ros::sleep)
-;; grasping ball
+;; ボールをつかむ 
 (send *dxl-armed-turtlebot* :init-pose)
 (send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 4000)
 (send *ri* :wait-interpolation)
@@ -200,7 +208,7 @@
 ;(send *ri* :wait-interpolation)
 (send *ri* :start-grasp)
 
-;; finding checkerboard
+;; アームをkinectの邪魔にならない姿勢にする 
 (send *dxl-armed-turtlebot* :init-pose)
 (send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 4000)
 (send *ri* :wait-interpolation)
@@ -211,6 +219,7 @@
 (print (send *dxl-armed-turtlebot* :angle-vector))
 (send *ri* :angle-vector (send *dxl-armed-turtlebot* :angle-vector) 2000)
 (send *ri* :wait-interpolation)
+;; 車体全体を回転させてchessboard探し 
 (do-until-key
   (send *ri* :go-velocity 0 0 10)
   (ros::spin-once)
@@ -223,6 +232,7 @@
 	    (return))))
   ;(ros::sleep)
   )
+;; chessboardに十分に近づく。chessboardが画面中央付近から外れた時は蛇行して修正 
 (do-until-key
   (cond ((> (elt (send (send *target-object* :worldcoords) :pos) 1) 10)
 	 (send *ri* :go-velocity 0.03 0 5))
@@ -241,9 +251,11 @@
   (ros::sleep)
   )
 (send *ri* :go-velocity 0 0 0)
+;; chessboard座標が最新の位置になるまで待機
 (setq board_flag 0)
 (while (= board_flag 0)
   (ros::spin-once))
+;; chessboardが正面に来るよう、車体角度を調整
 (do-until-key
   (cond ((> (elt (send (send *target-object* :worldcoords) :pos) 1) 5)
 	 (send *ri* :go-velocity 0 0 5))
@@ -259,6 +271,7 @@
   ;(ros::sleep)
   )
 (send *ri* :go-velocity 0 0 0)
+;; 掴んでいたボールを転がす
 (setq np (send *dxl-armed-turtlebot* :angle-vector))
 (setf (elt np 2) -55.0)
 (setf (elt np 4) -65.0)
